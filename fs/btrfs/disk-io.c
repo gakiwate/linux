@@ -2348,6 +2348,13 @@ retry_root_backup:
 	fs_info->generation = generation;
 	fs_info->last_trans_committed = generation;
 
+	ret = btrfs_init_device_stats(fs_info);
+	if (ret) {
+		printk(KERN_ERR "btrfs: failed to init device_stats: %d\n",
+				ret);
+		goto fail_block_groups;
+	}
+
 	ret = btrfs_init_space_info(fs_info);
 	if (ret) {
 		printk(KERN_ERR "Failed to initial space info: %d\n", ret);
@@ -2551,18 +2558,25 @@ recovery_tree_root:
 
 static void btrfs_end_buffer_write_sync(struct buffer_head *bh, int uptodate)
 {
-	char b[BDEVNAME_SIZE];
-
 	if (uptodate) {
 		set_buffer_uptodate(bh);
 	} else {
+		struct btrfs_device *device = (struct btrfs_device *)
+			(((uintptr_t)bh->b_private) & ~((uintptr_t)1));
+		unsigned int with_flush = ((uintptr_t)bh->b_private) & 1;
+
 		printk_ratelimited(KERN_WARNING "lost page write due to "
 					"I/O error on %s\n",
-				       bdevname(bh->b_bdev, b));
+				        device->name);
 		/* note, we dont' set_buffer_write_io_error because we have
 		 * our own ways of dealing with the IO errors
 		 */
 		clear_buffer_uptodate(bh);
+		btrfs_device_stat_inc(&device->cnt_write_io_errs);
+		if (with_flush)
+			btrfs_device_stat_inc(&device->cnt_flush_io_errs);
+		device->device_stats_dirty = 1;
+		btrfs_device_stat_print_on_error(device);
 	}
 	unlock_buffer(bh);
 	put_bh(bh);
@@ -2677,6 +2691,7 @@ static int write_dev_supers(struct btrfs_device *device,
 			set_buffer_uptodate(bh);
 			lock_buffer(bh);
 			bh->b_end_io = btrfs_end_buffer_write_sync;
+			bh->b_private = device;
 		}
 
 		/*
@@ -2734,6 +2749,9 @@ static int write_dev_flush(struct btrfs_device *device, int wait)
 			device->nobarriers = 1;
 		}
 		if (!bio_flagged(bio, BIO_UPTODATE)) {
+			btrfs_device_stat_inc(&device->cnt_flush_io_errs);
+			device->device_stats_dirty=1;
+			btrfs_device_stat_print_on_error(device);
 			ret = -EIO;
 		}
 
@@ -3683,3 +3701,4 @@ static struct extent_io_ops btree_extent_io_ops = {
 	.merge_bio_hook = btrfs_merge_bio_hook,
 	.writepage_io_failed_hook = btree_writepage_io_failed_hook,
 };
+

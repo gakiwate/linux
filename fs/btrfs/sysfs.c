@@ -65,6 +65,15 @@ struct btrfs_kobject_attr {
 
 #define to_btrfs_kobject_attr(x) container_of(x, struct btrfs_kobject_attr,attr)
 
+struct btrfs_device_attr {
+	struct attribute attr;
+	ssize_t (*show)(struct kobject *kobj, \
+			struct btrfs_device_attr *attr, char *buf);
+	ssize_t (*store)(struct kobject *kobj, \
+			struct btrfs_device_attr *attr, const char *buf, size_t len);
+
+#define to_btrfs_device_attr(x) container_of(x, struct btrfs_device_attr,attr)
+
 /*
  * static ssize_t btrfs_kobject_attr_show and 
  * static ssize_t btrfs_kobject_attr_store is defined as the default show and  
@@ -102,6 +111,34 @@ static ssize_t btrfs_kobject_attr_show(struct kobject *kobj, \
 	return btrfs_attr->show(btrfs_kobj, btrfs_attr, buf);
 }
 
+static ssize_t btrfs_device_attr_store(struct kobject *kobj, \
+			     struct attribute *attr, const char *buf, size_t len)
+{
+	struct btrfs_device_attr *btrfs_attr;
+
+	btrfs_attr = to_btrfs_device_attr(attr);
+	if (!btrfs_attr->store)
+		return -EIO;
+
+	return btrfs_attr->store(kobj,btrfs_attr,buf,len);
+}
+
+static ssize_t btrfs_device_attr_show(struct kobject *kobj, \
+				struct attribute *attr, char *buf)
+{
+
+	struct btrfs_device_attr *btrfs_attr;
+
+	btrfs_attr = to_btrfs_device_attr(attr);
+	if (!btrfs_attr->show)
+		return -EIO;
+
+	return btrfs_attr->show(kobj,btrfs_attr,buf);
+}
+
+
+
+
 /*
  * Our next goal is to define btrfs_ktype 
  * A kobject_type needs three things:
@@ -123,6 +160,12 @@ static const struct sysfs_ops btrfs_sysfs_ops = {
 	.show = btrfs_kobject_attr_show,
 };
 
+
+static const struct sysfs_ops btrfs_device_sysfs_ops = {
+	.store = btrfs_device_attr_store,
+	.show = btrfs_device_attr_show,
+};
+
 static void btrfs_kobject_release(struct kobject *kobj)
 {
 	/*
@@ -140,7 +183,12 @@ static void btrfs_kobject_release(struct kobject *kobj)
 	 */
 }
 
-
+static void btrfs_device_release(struct kobject *kobj)
+{
+	/*
+	 * As of now nothing to clean up.
+	 */
+}
 
 /*
  * The btrfs_sysfs_ops defines two default functions. These functions in turn 
@@ -169,7 +217,13 @@ static void btrfs_kobject_release(struct kobject *kobj)
 #define BTRFS_ATTR(_name,_mode,_show,_store) \
 struct btrfs_kobject_attr btrfs_attr_##_name = __ATTR(_name,_mode,_show,_store)
 
-#define ATTR_LIST(_name) &btrfs_attr_##_name.attr
+#define ATTR_LIST(name) &btrfs_attr_##name.attr
+
+
+#define BTRFS_DEVICE_ATTR(_name,_mode,_show,_store) \
+struct btrfs_device_attr btrfs_dev_attr_##_name = __ATTR(_name,_mode,_show,_store)
+
+#define DEVICE_ATTR_LIST(_name) &btrfs_dev_attr_##_name.attr
 
 /*
  * Example Usage::
@@ -233,11 +287,93 @@ static struct kobj_type btrfs_ktype_device_dir = {
 	.default_attrs = btrfs_device_dir_default_attrs,
 };
 
+
+/*
+ * Setup for /sys/fs/btrfs/devices/<device> Directory
+ */
+
+static struct btrfs_device* device_stats(struct kobject *btrfs_kobj)
+{
+	return container_of(btrfs_kobj,struct btrfs_device,device_kobj);
+}
+
+static ssize_t device_write_io_err_show(struct kobject *btrfs_kobj, \
+	struct btrfs_device_attr *attr, char *buf)
+{
+	struct btrfs_device *device;
+	device = device_stats(btrfs_kobj);
+	return sprintf(buf, "%d\n", device->cnt_write_io_errs.counter);
+}
+
+static ssize_t device_read_io_err_show(struct kobject *btrfs_kobj, \
+	struct btrfs_device_attr *attr, char *buf)
+{
+	struct btrfs_device *device;
+	device = device_stats(btrfs_kobj);
+	return sprintf(buf, "%d\n", device->cnt_read_io_errs.counter);
+}
+
+static ssize_t device_flush_io_err_show(struct kobject *btrfs_kobj, \
+	struct btrfs_device_attr *attr, char *buf)
+{
+	struct btrfs_device *device;
+	device = device_stats(btrfs_kobj);
+	return sprintf(buf, "%d\n", device->cnt_flush_io_errs.counter);
+}
+
+static ssize_t device_corruption_err_show(struct kobject *btrfs_kobj, \
+	struct btrfs_device_attr *attr, char *buf)
+{
+	struct btrfs_device *device;
+	device = device_stats(btrfs_kobj);
+	return sprintf(buf, "%d\n", device->cnt_corruption_errs.counter);
+}
+
+static ssize_t device_generation_err_show(struct kobject *btrfs_kobj, \
+	struct btrfs_device_attr *attr, char *buf)
+{
+	struct btrfs_device *device;
+	device = device_stats(btrfs_kobj);
+	return sprintf(buf, "%d\n", device->cnt_generation_errs.counter);
+}
+
+/* Show function for uuid . */
+static ssize_t device_uuid_show(struct kobject *btrfs_kobj, \
+	struct btrfs_device_attr *attr, char *buf)
+{
+	struct btrfs_device *device;
+	device = device_stats(btrfs_kobj);
+	return sprintf(buf, "%s\n", device->uuid);
+}
+
+static BTRFS_DEVICE_ATTR(uuid,0444,device_uuid_show, NULL);
+static BTRFS_DEVICE_ATTR(cnt_write_io_errs,0444,device_write_io_err_show,NULL);
+static BTRFS_DEVICE_ATTR(cnt_read_io_errs,0444,device_read_io_err_show,NULL);
+static BTRFS_DEVICE_ATTR(cnt_flush_io_errs,0444,device_flush_io_err_show,NULL);
+static BTRFS_DEVICE_ATTR(cnt_corruption_errs,0444,device_corruption_err_show,NULL);
+static BTRFS_DEVICE_ATTR(cnt_generation_errs,0444,device_generation_err_show,NULL);
+
+static struct attribute *btrfs_device_default_attrs[] = {
+	DEVICE_ATTR_LIST(uuid),
+	DEVICE_ATTR_LIST(label),
+	DEVICE_ATTR_LIST(cnt_write_io_errs),
+	DEVICE_ATTR_LIST(cnt_read_io_errs),
+	DEVICE_ATTR_LIST(cnt_flush_io_errs),
+	DEVICE_ATTR_LIST(cnt_corruption_errs),
+	DEVICE_ATTR_LIST(cnt_generation_errs),
+	NULL,
+};
+static struct kobj_type btrfs_ktype_device = {
+	.sysfs_ops = &btrfs_device_sysfs_ops,
+	.release = btrfs_device_release,
+	.default_attrs = btrfs_device_default_attrs,
+};
+
 static int btrfs_kobject_init_sysfs(void)
 {
 	int ret;
 	btrfs_devices.kobj.kset = btrfs_kset;
-	ret = kobject_init_and_add(&btrfs_devices.kobj,&btrfs_ktype_device_dir, \
+	ret = kobject_init_and_add(&btrfs_devices.kobj,&btrfs_ktype_device_dir,\
 					NULL,"%s","devices");
 	if (ret)
 	{
@@ -255,9 +391,27 @@ int btrfs_init_sysfs(void)
 	return btrfs_kobject_init_sysfs();
 }
 
+int btrfs_create_device(struct kobject *device_kobj,char *dev_name)
+{
+	int ret;
+	ret = kobject_init_and_add(device_kobj,&btrfs_ktype_device, \
+			&btrfs_devices.kobj,"%s",dev_name);
+	if(ret)
+	{
+		kobject_put(device_kobj);
+		return -EINVAL;
+	}
+	return 0;
+}
+
 void btrfs_kobject_destroy(struct btrfs_kobject *btrfs_kobj)
 {
 	kobject_put(&btrfs_kobj->kobj);
+}
+
+void btrfs_kill_device(struct kobject *device_kobj)
+{
+	kobject_put(kobj);
 }
 
 void btrfs_exit_sysfs(void)
