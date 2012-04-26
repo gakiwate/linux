@@ -27,7 +27,7 @@
 #include "ctree.h"
 #include "disk-io.h"
 #include "transaction.h"
-
+#include "volumes.h"
 /*
  * struct btrfs_kobject is defined to allow kobjects to be created and defined
  * under btrfs_kset.
@@ -71,7 +71,7 @@ struct btrfs_device_attr {
 			struct btrfs_device_attr *attr, char *buf);
 	ssize_t (*store)(struct kobject *kobj, \
 			struct btrfs_device_attr *attr, const char *buf, size_t len);
-
+};
 #define to_btrfs_device_attr(x) container_of(x, struct btrfs_device_attr,attr)
 
 /*
@@ -81,6 +81,7 @@ struct btrfs_device_attr {
  * sysfs by default the respective function is called by the user on a sysfs 
  * file associated with the kobjects we have registered.
  */
+
 static ssize_t btrfs_kobject_attr_store(struct kobject *kobj, \
 			     struct attribute *attr, const char *buf, size_t len)
 {
@@ -292,7 +293,7 @@ static struct kobj_type btrfs_ktype_device_dir = {
  * Setup for /sys/fs/btrfs/devices/<device> Directory
  */
 
-static struct btrfs_device* device_stats(struct kobject *btrfs_kobj)
+static inline struct btrfs_device *device_stats(struct kobject *btrfs_kobj)
 {
 	return container_of(btrfs_kobj,struct btrfs_device,device_kobj);
 }
@@ -355,7 +356,6 @@ static BTRFS_DEVICE_ATTR(cnt_generation_errs,0444,device_generation_err_show,NUL
 
 static struct attribute *btrfs_device_default_attrs[] = {
 	DEVICE_ATTR_LIST(uuid),
-	DEVICE_ATTR_LIST(label),
 	DEVICE_ATTR_LIST(cnt_write_io_errs),
 	DEVICE_ATTR_LIST(cnt_read_io_errs),
 	DEVICE_ATTR_LIST(cnt_flush_io_errs),
@@ -411,7 +411,7 @@ void btrfs_kobject_destroy(struct btrfs_kobject *btrfs_kobj)
 
 void btrfs_kill_device(struct kobject *device_kobj)
 {
-	kobject_put(kobj);
+	kobject_put(device_kobj);
 }
 
 void btrfs_exit_sysfs(void)
