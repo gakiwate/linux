@@ -23,6 +23,7 @@
 #include <linux/buffer_head.h>
 #include <linux/module.h>
 #include <linux/kobject.h>
+#include <string.h>
 
 #include "ctree.h"
 #include "disk-io.h"
@@ -394,6 +395,20 @@ int btrfs_init_sysfs(void)
 int btrfs_create_device(struct kobject *device_kobj,char *dev_name)
 {
 	int ret;
+	char device_name[64];
+	char *prev;
+	char *curr;
+	char *ptr;
+		
+	/*
+	 * Convert from /dev/<device_name> to <device_name> so as to
+ 	 * make it more readable.
+	 */
+	strcpy(device_name,dev_name);
+	for(ptr=device_name; (curr=strsep(&ptr,"/"))!=NULL; prev=curr);
+
+	printk(KERN_INFO "btrfs: Added Device: %s",device_name);
+
 	ret = kobject_init_and_add(device_kobj,&btrfs_ktype_device, \
 			&btrfs_devices.kobj,"%s",dev_name);
 	if(ret)
