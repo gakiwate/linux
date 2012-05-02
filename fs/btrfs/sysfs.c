@@ -28,6 +28,7 @@
 #include "disk-io.h"
 #include "transaction.h"
 #include "volumes.h"
+
 /*
  * struct btrfs_kobject is defined to allow kobjects to be created and defined
  * under btrfs_kset.
@@ -39,6 +40,7 @@
  * The idea is that the void pointer can be put to use in certain cases without 
  * complicating the code.
  */
+
 struct btrfs_kobject{
         struct kobject kobj;
 	struct completion btrfs_kobj_unregister;
@@ -63,7 +65,6 @@ struct btrfs_kobject_attr {
         ssize_t (*store)(struct btrfs_kobject *kobj, \
                 struct btrfs_kobject_attr *attr, const char *buf, size_t len);
 };
-
 #define to_btrfs_kobject_attr(x) container_of(x, struct btrfs_kobject_attr,attr)
 
 struct btrfs_device_attr {
@@ -72,6 +73,7 @@ struct btrfs_device_attr {
 			struct btrfs_device_attr *attr, char *buf);
 	ssize_t (*store)(struct kobject *kobj, \
 			struct btrfs_device_attr *attr, const char *buf, size_t len);
+	int offset;
 };
 #define to_btrfs_device_attr(x) container_of(x, struct btrfs_device_attr,attr)
 
@@ -137,9 +139,6 @@ static ssize_t btrfs_device_attr_show(struct kobject *kobj, \
 
 	return btrfs_attr->show(kobj,btrfs_attr,buf);
 }
-
-
-
 
 /*
  * Our next goal is to define btrfs_ktype 
@@ -217,6 +216,13 @@ struct btrfs_kobject_attr btrfs_attr_##_name = __ATTR(_name,_mode,_show,_store)
 
 #define ATTR_LIST(name) &btrfs_attr_##name.attr
 
+#define BTRFS_DEVICE_OFFSET_ATTR(_name,_mode,_show,_store,_elname) \
+struct btrfs_device_attr btrfs_dev_attr_##_name = {	\
+	.attr = {.name = __stringify(_name), .mode = _mode },	\
+	.show = _show, 						\
+	.store = _store,					\
+	.offset = offsetof(struct btrfs_device, _elname),	\
+}
 
 #define BTRFS_DEVICE_ATTR(_name,_mode,_show,_store) \
 struct btrfs_device_attr btrfs_dev_attr_##_name = __ATTR(_name,_mode,_show,_store)
@@ -246,11 +252,8 @@ struct btrfs_device_attr btrfs_dev_attr_##_name = __ATTR(_name,_mode,_show,_stor
  * };
  */
 
-
 /* /sys/fs/btrfs/ entry */
 static struct kset *btrfs_kset;
-
-
 
 /*
  * The next goal is to implement the first level of directory structure under
@@ -290,69 +293,25 @@ static struct kobj_type btrfs_ktype_device_dir = {
  * Setup for /sys/fs/btrfs/devices/<device> Directory
  */
 
-static inline struct btrfs_device *device_stats(struct kobject *btrfs_kobj)
-{
-	return container_of(btrfs_kobj,struct btrfs_device,device_kobj);
-}
+#define to_dev_kobj(x) container_of(x,struct btrfs_device,device_kobj);
 
-static ssize_t device_write_io_err_show(struct kobject *btrfs_kobj, \
+static ssize_t btrfs_device_show(struct kobject *btrfs_dev_kobj, \
 	struct btrfs_device_attr *attr, char *buf)
 {
+	int *device_attr;
 	struct btrfs_device *device;
-	device = device_stats(btrfs_kobj);
-	return sprintf(buf, "%d\n", device->cnt_write_io_errs.counter);
+	device = to_dev_kobj(btrfs_dev_kobj);
+	device_attr = (int *) (((char *) device ) + attr->offset);
+	return sprintf(buf, "%d\n", *device_attr);
 }
 
-static ssize_t device_read_io_err_show(struct kobject *btrfs_kobj, \
-	struct btrfs_device_attr *attr, char *buf)
-{
-	struct btrfs_device *device;
-	device = device_stats(btrfs_kobj);
-	return sprintf(buf, "%d\n", device->cnt_read_io_errs.counter);
-}
-
-static ssize_t device_flush_io_err_show(struct kobject *btrfs_kobj, \
-	struct btrfs_device_attr *attr, char *buf)
-{
-	struct btrfs_device *device;
-	device = device_stats(btrfs_kobj);
-	return sprintf(buf, "%d\n", device->cnt_flush_io_errs.counter);
-}
-
-static ssize_t device_corruption_err_show(struct kobject *btrfs_kobj, \
-	struct btrfs_device_attr *attr, char *buf)
-{
-	struct btrfs_device *device;
-	device = device_stats(btrfs_kobj);
-	return sprintf(buf, "%d\n", device->cnt_corruption_errs.counter);
-}
-
-static ssize_t device_generation_err_show(struct kobject *btrfs_kobj, \
-	struct btrfs_device_attr *attr, char *buf)
-{
-	struct btrfs_device *device;
-	device = device_stats(btrfs_kobj);
-	return sprintf(buf, "%d\n", device->cnt_generation_errs.counter);
-}
-
-/* Show function for uuid . */
-static ssize_t device_uuid_show(struct kobject *btrfs_kobj, \
-	struct btrfs_device_attr *attr, char *buf)
-{
-	struct btrfs_device *device;
-	device = device_stats(btrfs_kobj);
-	return sprintf(buf, "%s\n", device->uuid);
-}
-
-static BTRFS_DEVICE_ATTR(uuid,0444,device_uuid_show, NULL);
-static BTRFS_DEVICE_ATTR(cnt_write_io_errs,0444,device_write_io_err_show,NULL);
-static BTRFS_DEVICE_ATTR(cnt_read_io_errs,0444,device_read_io_err_show,NULL);
-static BTRFS_DEVICE_ATTR(cnt_flush_io_errs,0444,device_flush_io_err_show,NULL);
-static BTRFS_DEVICE_ATTR(cnt_corruption_errs,0444,device_corruption_err_show,NULL);
-static BTRFS_DEVICE_ATTR(cnt_generation_errs,0444,device_generation_err_show,NULL);
+static BTRFS_DEVICE_OFFSET_ATTR(cnt_write_io_errs,0444,btrfs_device_show,NULL,cnt_write_io_errs.counter);
+static BTRFS_DEVICE_OFFSET_ATTR(cnt_read_io_errs,0444,btrfs_device_show,NULL,cnt_read_io_errs.counter);
+static BTRFS_DEVICE_OFFSET_ATTR(cnt_flush_io_errs,0444,btrfs_device_show,NULL,cnt_flush_io_errs.counter);
+static BTRFS_DEVICE_OFFSET_ATTR(cnt_corruption_errs,0444,btrfs_device_show,NULL,cnt_corruption_errs.counter);
+static BTRFS_DEVICE_OFFSET_ATTR(cnt_generation_errs,0444,btrfs_device_show,NULL,cnt_generation_errs.counter);
 
 static struct attribute *btrfs_device_default_attrs[] = {
-	DEVICE_ATTR_LIST(uuid),
 	DEVICE_ATTR_LIST(cnt_write_io_errs),
 	DEVICE_ATTR_LIST(cnt_read_io_errs),
 	DEVICE_ATTR_LIST(cnt_flush_io_errs),
@@ -405,7 +364,7 @@ int btrfs_create_device(struct kobject *device_kobj,char *dev_name)
 	strcpy(device_name,dev_name);
 	for(ptr=device_name; (curr=strsep(&ptr,"/"))!=NULL; prev=curr);
 
-	printk(KERN_INFO "btrfs: Added Device: %s",prev);
+	printk(KERN_INFO "btrfs: added sysfs device entry: %s",prev);
 
 	ret = kobject_init_and_add(device_kobj,&btrfs_ktype_device, \
 			&btrfs_devices.kobj,"%s",prev);
