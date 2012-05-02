@@ -23,7 +23,6 @@
 #include <linux/buffer_head.h>
 #include <linux/module.h>
 #include <linux/kobject.h>
-#include <string.h>
 
 #include "ctree.h"
 #include "disk-io.h"
@@ -42,6 +41,7 @@
  */
 struct btrfs_kobject{
         struct kobject kobj;
+	struct completion btrfs_kobj_unregister;
         void *ptr;
 };
 #define to_btrfs_kobject(x) container_of(x, struct btrfs_kobject, kobj)
@@ -171,18 +171,14 @@ static const struct sysfs_ops btrfs_device_sysfs_ops = {
 static void btrfs_kobject_release(struct kobject *kobj)
 {
 	/*
-	 * As of now nothing to clean up. 
 	 * We are using global static btrfs_kobject definitions
 	 * so we don't have to allocate memory dynamically and hence
 	 * not free it also. However, in case we switch to dynamically
 	 * created btrfs_kobject then the code given below should be used
 	 */
-	
-	/*
-	 * struct btrfs_kobject *tmp_kobj;
-	 * tmp_kobj = to_btrfs_kobject(kobj);
-	 * kfree(tmp_kobj);
-	 */
+	 struct btrfs_kobject *tmp_kobj;
+	 tmp_kobj = to_btrfs_kobject(kobj);
+	 complete(&tmp_kobj->btrfs_kobj_unregister);
 }
 
 static void btrfs_device_release(struct kobject *kobj)
@@ -374,6 +370,7 @@ static int btrfs_kobject_init_sysfs(void)
 {
 	int ret;
 	btrfs_devices.kobj.kset = btrfs_kset;
+	init_completion(&btrfs_devices.btrfs_kobj_unregister);
 	ret = kobject_init_and_add(&btrfs_devices.kobj,&btrfs_ktype_device_dir,\
 					NULL,"%s","devices");
 	if (ret)
@@ -404,13 +401,14 @@ int btrfs_create_device(struct kobject *device_kobj,char *dev_name)
 	 * Convert from /dev/<device_name> to <device_name> so as to
  	 * make it more readable.
 	 */
+	prev = NULL;
 	strcpy(device_name,dev_name);
 	for(ptr=device_name; (curr=strsep(&ptr,"/"))!=NULL; prev=curr);
 
-	printk(KERN_INFO "btrfs: Added Device: %s",device_name);
+	printk(KERN_INFO "btrfs: Added Device: %s",prev);
 
 	ret = kobject_init_and_add(device_kobj,&btrfs_ktype_device, \
-			&btrfs_devices.kobj,"%s",dev_name);
+			&btrfs_devices.kobj,"%s",prev);
 	if(ret)
 	{
 		kobject_put(device_kobj);
@@ -422,6 +420,7 @@ int btrfs_create_device(struct kobject *device_kobj,char *dev_name)
 void btrfs_kobject_destroy(struct btrfs_kobject *btrfs_kobj)
 {
 	kobject_put(&btrfs_kobj->kobj);
+	wait_for_completion(&btrfs_kobj->btrfs_kobj_unregister);
 }
 
 void btrfs_kill_device(struct kobject *device_kobj)
