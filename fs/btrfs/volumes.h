@@ -116,8 +116,9 @@ struct btrfs_device {
 	atomic_t cnt_corruption_errs;
 	atomic_t cnt_generation_errs;
 
-	/* Kobject used my Sysfs. */
+	/* kobject and struct completion used in sysfs. */
 	struct kobject device_kobj;
+	struct completion btrfs_device_unregister;
 };
 
 struct btrfs_fs_devices {
