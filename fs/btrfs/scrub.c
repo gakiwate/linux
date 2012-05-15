@@ -1264,6 +1264,15 @@ static int scrub_checksum_data(struct scrub_block *sblock)
 	if (memcmp(csum, on_disk_csum, sdev->csum_size))
 		fail = 1;
 
+	if (fail) {
+		spin_lock(&sdev->stat_lock);
+		++sdev->stat.csum_errors;
+		btrfs_device_stat_inc(&sdev->dev->cnt_corruption_errs);
+		sdev->dev->device_stats_dirty = 1;
+		btrfs_device_stat_print_on_error(sdev->dev);
+		spin_unlock(&sdev->stat_lock);
+	}
+
 	return fail;
 }
 
@@ -1336,6 +1345,19 @@ static int scrub_checksum_tree_block(struct scrub_block *sblock)
 	if (memcmp(calculated_csum, on_disk_csum, sdev->csum_size))
 		++crc_fail;
 
+	if (crc_fail || fail) {
+		spin_lock(&sdev->stat_lock);
+		if (crc_fail){
+			++sdev->stat.csum_errors;
+			btrfs_device_stat_inc(&sdev->dev->cnt_corruption_errs);
+			sdev->dev->device_stats_dirty = 1;
+			btrfs_device_stat_print_on_error(sdev->dev);
+			}
+		if (fail)
+			++sdev->stat.verify_errors;
+		spin_unlock(&sdev->stat_lock);
+	}
+
 	return fail || crc_fail;
 }
 
@@ -1393,8 +1415,13 @@ static int scrub_checksum_super(struct scrub_block *sblock)
 	}
 
 	btrfs_csum_final(crc, calculated_csum);
-	if (memcmp(calculated_csum, on_disk_csum, sdev->csum_size))
+
+	if (memcmp(calculated_csum, s->csum, sdev->csum_size)) {
 		++fail;
+		btrfs_device_stat_inc(&sdev->dev->cnt_corruption_errs);
+		sdev->dev->device_stats_dirty = 1;
+		btrfs_device_stat_print_on_error(sdev->dev);
+	}
 
 	if (fail) {
 		/*
@@ -1594,6 +1621,19 @@ static void scrub_bio_end_io(struct bio *bio, int err)
 	struct scrub_bio *sbio = bio->bi_private;
 	struct scrub_dev *sdev = sbio->sdev;
 	struct btrfs_fs_info *fs_info = sdev->dev->dev_root->fs_info;
+
+	if (-EIO == err || -EREMOTEIO == err) {
+		struct btrfs_device *dev = sdev->dev;
+
+		if (bio->bi_rw & WRITE)
+			btrfs_device_stat_inc(&dev->cnt_write_io_errs);
+		else
+			btrfs_device_stat_inc(&dev->cnt_read_io_errs);
+		if (WRITE_FLUSH == (bio->bi_rw & WRITE_FLUSH))
+			btrfs_device_stat_inc(&dev->cnt_flush_io_errs);
+		dev->device_stats_dirty = 1;
+		btrfs_device_stat_print_on_error(dev);
+	}
 
 	sbio->err = err;
 	sbio->bio = bio;

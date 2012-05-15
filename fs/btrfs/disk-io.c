@@ -323,8 +323,8 @@ static int csum_tree_block(struct btrfs_root *root, struct extent_buffer *buf,
  * in the wrong place.
  */
 static int verify_parent_transid(struct extent_io_tree *io_tree,
-				 struct extent_buffer *eb, u64 parent_transid,
-				 int atomic)
+				struct extent_buffer *eb, u64 parent_transid,
+				int atomic)
 {
 	struct extent_state *cached_state = NULL;
 	int ret;
@@ -334,6 +334,7 @@ static int verify_parent_transid(struct extent_io_tree *io_tree,
 
 	if (atomic)
 		return -EAGAIN;
+
 
 	lock_extent_bits(io_tree, eb->start, eb->start + eb->len - 1,
 			 0, &cached_state);
@@ -376,8 +377,9 @@ static int btree_read_extent_buffer_pages(struct btrfs_root *root,
 		ret = read_extent_buffer_pages(io_tree, eb, start,
 					       WAIT_COMPLETE,
 					       btree_get_extent, mirror_num);
+
 		if (!ret && !verify_parent_transid(io_tree, eb,
-						   parent_transid, 0))
+							parent_transid, 0))
 			break;
 
 		/*
@@ -2353,6 +2355,13 @@ retry_root_backup:
 	fs_info->generation = generation;
 	fs_info->last_trans_committed = generation;
 
+	ret = btrfs_init_device_stats(fs_info);
+	if (ret) {
+		printk(KERN_ERR "btrfs: failed to init device_stats: %d\n",
+				ret);
+		goto fail_block_groups;
+	}
+
 	ret = btrfs_init_space_info(fs_info);
 	if (ret) {
 		printk(KERN_ERR "Failed to initial space info: %d\n", ret);
@@ -2556,18 +2565,28 @@ recovery_tree_root:
 
 static void btrfs_end_buffer_write_sync(struct buffer_head *bh, int uptodate)
 {
-	char b[BDEVNAME_SIZE];
 
 	if (uptodate) {
 		set_buffer_uptodate(bh);
 	} else {
-		printk_ratelimited(KERN_WARNING "lost page write due to "
-					"I/O error on %s\n",
-				       bdevname(bh->b_bdev, b));
+
+		struct btrfs_device *device = (struct btrfs_device *)
+			(((uintptr_t)bh->b_private) & ~((uintptr_t)1));
+		unsigned int with_flush = ((uintptr_t)bh->b_private) & 1;
+
+		printk_ratelimited(KERN_WARNING "lost page write due to"
+			"I/O error on %s\n", device->name);
+
 		/* note, we dont' set_buffer_write_io_error because we have
 		 * our own ways of dealing with the IO errors
 		 */
 		clear_buffer_uptodate(bh);
+
+		btrfs_device_stat_inc(&device->cnt_write_io_errs);
+		if (with_flush)
+			btrfs_device_stat_inc(&device->cnt_flush_io_errs);
+		device->device_stats_dirty = 1;
+		btrfs_device_stat_print_on_error(device);
 	}
 	unlock_buffer(bh);
 	put_bh(bh);
@@ -2682,6 +2701,7 @@ static int write_dev_supers(struct btrfs_device *device,
 			set_buffer_uptodate(bh);
 			lock_buffer(bh);
 			bh->b_end_io = btrfs_end_buffer_write_sync;
+			bh->b_private = device;
 		}
 
 		/*
@@ -2740,6 +2760,9 @@ static int write_dev_flush(struct btrfs_device *device, int wait)
 		}
 		if (!bio_flagged(bio, BIO_UPTODATE)) {
 			ret = -EIO;
+			btrfs_device_stat_inc(&device->cnt_flush_io_errs);
+			device->device_stats_dirty=1;
+			btrfs_device_stat_print_on_error(device);
 		}
 
 		/* drop the reference from the wait == 0 run */
@@ -3149,7 +3172,7 @@ int close_ctree(struct btrfs_root *root)
 }
 
 int btrfs_buffer_uptodate(struct extent_buffer *buf, u64 parent_transid,
-			  int atomic)
+				int atomic)
 {
 	int ret;
 	struct inode *btree_inode = buf->pages[0]->mapping->host;
@@ -3159,9 +3182,10 @@ int btrfs_buffer_uptodate(struct extent_buffer *buf, u64 parent_transid,
 		return ret;
 
 	ret = verify_parent_transid(&BTRFS_I(btree_inode)->io_tree, buf,
-				    parent_transid, atomic);
+				parent_transid, atomic);
 	if (ret == -EAGAIN)
 		return ret;
+
 	return !ret;
 }
 
