@@ -116,6 +116,11 @@ struct btrfs_device {
 	atomic_t cnt_flush_io_errs;
 	atomic_t cnt_corruption_errs;
 	atomic_t cnt_generation_errs;
+
+	/* struct kobject and struct completion to add sysfs support
+	 * for Device Stats */
+	struct kobject device_kobj;
+	struct completion btrfs_device_unregister;
 };
 
 struct btrfs_fs_devices {
