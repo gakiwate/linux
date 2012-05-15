@@ -3036,6 +3036,8 @@ int btrfs_defrag_leaves(struct btrfs_trans_handle *trans,
 /* sysfs.c */
 int btrfs_init_sysfs(void);
 void btrfs_exit_sysfs(void);
+int btrfs_add_device_sysfs(struct kobject *device_kobj, char *dev_name);
+void btrfs_rm_device_sysfs(struct kobject *device_kobj);
 
 /* xattr.c */
 ssize_t btrfs_listxattr(struct dentry *dentry, char *buffer, size_t size);
