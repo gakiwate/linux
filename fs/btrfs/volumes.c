@@ -551,6 +551,11 @@ static int __btrfs_close_devices(struct btrfs_fs_devices *fs_devices)
 
 		if (device->can_discard)
 			fs_devices->num_can_discard--;
+		/*
+		 * At this point we must clean up the sysfs and remove
+		 * the corresponding sysfs entry for the device
+		 */
+		btrfs_rm_device_sysfs(&device->device_kobj);
 
 		new_device = kmalloc(sizeof(*new_device), GFP_NOFS);
 		BUG_ON(!new_device); /* -ENOMEM */
@@ -677,6 +682,12 @@ static int __btrfs_open_devices(struct btrfs_fs_devices *fs_devices,
 				 &fs_devices->alloc_list);
 		}
 		brelse(bh);
+
+		/* Add sysfs entry for the device */
+		if(btrfs_add_device_sysfs(&device->device_kobj, device->name) < 0) {
+			printk(KERN_INFO "btrfs: Could not create sysfs \
+				entry for device %s\n", device->name);
+		}
 		continue;
 
 error_brelse:
@@ -1241,6 +1252,12 @@ int btrfs_add_device(struct btrfs_trans_handle *trans,
 	write_extent_buffer(leaf, root->fs_info->fsid, ptr, BTRFS_UUID_SIZE);
 	btrfs_mark_buffer_dirty(leaf);
 
+	/* Add sysfs entry for the device */
+	if(btrfs_add_device_sysfs(&device->device_kobj,device->name) < 0) {
+		printk(KERN_INFO "btrfs: Could not create sysfs \
+			entry for device %s\n", device->name);
+	}
+
 	ret = 0;
 out:
 	btrfs_free_path(path);
@@ -1467,6 +1484,12 @@ int btrfs_rm_device(struct btrfs_root *root, char *device_path)
 		set_buffer_dirty(bh);
 		sync_dirty_buffer(bh);
 	}
+
+	/*
+	 * At this point we must clean up the sysfs and remove
+	 * the corresponding sysfs entry for the device
+	 */
+	btrfs_rm_device_sysfs(&device->device_kobj);
 
 	ret = 0;
 
